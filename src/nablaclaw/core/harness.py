@@ -7,9 +7,12 @@ from nablaclaw.core.agent_factory import AgentFactory
 from nablaclaw.core.budget import BudgetManager
 from nablaclaw.core.lifecycle import AgentMesh
 from nablaclaw.core.runtime import AgentRuntime
+from nablaclaw.core.session import SessionController, SessionState
+from nablaclaw.core.telemetry import TelemetryStore
 from nablaclaw.core.skills import SkillRegistry
 from nablaclaw.core.society import AgentSociety
 from nablaclaw.core.types import ExecutionContext, ExecutionResult
+from nablaclaw.core.workflow import TaskPacket, WorkflowEngine, WorkflowResult
 from nablaclaw.skills import LocalSkillLibrary, SkillSpec
 
 
@@ -35,15 +38,20 @@ class AdvancedHarness:
     channels: ChannelHub = field(default_factory=ChannelHub)
     factory: AgentFactory = field(default_factory=AgentFactory)
     skill_library: LocalSkillLibrary = field(default_factory=LocalSkillLibrary)
+    session: SessionController = field(default_factory=SessionController)
+    telemetry: TelemetryStore = field(default_factory=TelemetryStore)
 
     def __post_init__(self) -> None:
         if self.root_agent.role not in self.registry:
             self.registry[self.root_agent.role] = self.root_agent
         self.factory.register(self.root_agent)
+        self.session.transition(SessionState.READY)
+        self.telemetry.publish("session_ready", role=self.root_agent.role)
 
     def register_agent(self, agent: AgentRuntime) -> None:
         self.registry[agent.role] = agent
         self.factory.register(agent)
+        self.telemetry.publish("agent_registered", role=agent.role)
 
     def create_agent_for_user(self, new_role: str) -> AgentRuntime:
         agent = self.factory.create_by_user(root=self.root_agent, new_role=new_role)
@@ -67,6 +75,8 @@ class AdvancedHarness:
             skill_registry.register(self.skill_library.compile_skill(spec))
 
     def run(self, context: ExecutionContext) -> ExecutionResult:
+        self.session.transition(SessionState.RUNNING)
+        self.telemetry.publish("task_started", requester=context.requester_role, task_id=context.task.id)
         budget = BudgetManager(context.max_cost or self.default_budget)
         actor = self.registry.get(context.requester_role, self.root_agent)
 
@@ -81,13 +91,16 @@ class AdvancedHarness:
         budget.reserve(execution_cost)
         context.trace.append(f"budget:-{execution_cost}")
 
-        return ExecutionResult(
+        result = ExecutionResult(
             task_id=context.task.id,
             output=output,
             route="auto",
             consumed_budget=(context.max_cost or self.default_budget) - budget.remaining,
             trace=context.trace,
         )
+        self.session.transition(SessionState.FINISHED)
+        self.telemetry.publish("task_finished", task_id=context.task.id, spent=result.consumed_budget)
+        return result
 
     def delegate(
         self,
@@ -121,3 +134,16 @@ class AdvancedHarness:
 
     def society_overview(self) -> str:
         return self.society.describe()
+
+
+    def run_packet(self, packet: TaskPacket) -> WorkflowResult:
+        engine = WorkflowEngine(self)
+        return engine.run_packet(packet)
+
+    def status(self) -> dict[str, object]:
+        return {
+            "session": self.session.as_dict(),
+            "agents": self.factory.list_roles(),
+            "skills": self.root_agent.skills.list_names(),
+            "telemetry": self.telemetry.recent(20),
+        }

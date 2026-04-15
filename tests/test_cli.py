@@ -38,3 +38,23 @@ def test_cli_parser_accepts_desktop_mode() -> None:
     args = parser.parse_args(["desktop", "--provider", "echo"])
     assert args.command == "desktop"
     assert args.provider == "echo"
+
+
+def test_cli_parser_accepts_doctor_mode() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["doctor", "--json"])
+    assert args.command == "doctor"
+    assert args.json is True
+
+
+def test_cli_parser_accepts_status_mode() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["status", "--provider", "echo"])
+    assert args.command == "status"
+
+
+def test_cli_parser_accepts_packet_mode() -> None:
+    parser = build_parser()
+    args = parser.parse_args(["packet", "--file", "workflow.json", "--provider", "echo"])
+    assert args.command == "packet"
+    assert args.file == "workflow.json"

@@ -1,10 +1,37 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from urllib import request
 
 from nablaclaw.adapters.base import ModelAdapter
+
+
+def _http_post_json(
+    *,
+    url: str,
+    payload: dict[str, object],
+    headers: dict[str, str],
+    timeout_seconds: int,
+    retries: int,
+) -> dict[str, object]:
+    last_error: Exception | None = None
+    for attempt in range(retries + 1):
+        try:
+            req = request.Request(
+                url=url,
+                method="POST",
+                data=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+            )
+            with request.urlopen(req, timeout=timeout_seconds) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as err:
+            last_error = err
+            if attempt < retries:
+                time.sleep(0.5 * (2**attempt))
+    raise RuntimeError(f"Falha HTTP após retries: {last_error}")
 
 
 @dataclass
@@ -14,23 +41,23 @@ class OllamaAdapter(ModelAdapter):
     model: str
     base_url: str = "http://127.0.0.1:11434"
     timeout_seconds: int = 30
+    retries: int = 1
 
     def generate(self, prompt: str, *, system: str | None = None) -> str:
-        payload = {
+        payload: dict[str, object] = {
             "model": self.model,
             "prompt": prompt,
             "stream": False,
         }
         if system:
             payload["system"] = system
-        req = request.Request(
+        data = _http_post_json(
             url=f"{self.base_url}/api/generate",
-            method="POST",
-            data=json.dumps(payload).encode("utf-8"),
+            payload=payload,
             headers={"Content-Type": "application/json"},
+            timeout_seconds=self.timeout_seconds,
+            retries=self.retries,
         )
-        with request.urlopen(req, timeout=self.timeout_seconds) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
         return str(data.get("response", ""))
 
 
@@ -42,6 +69,7 @@ class OpenRouterAdapter(ModelAdapter):
     api_key: str
     base_url: str = "https://openrouter.ai/api/v1"
     timeout_seconds: int = 30
+    retries: int = 1
 
     def generate(self, prompt: str, *, system: str | None = None) -> str:
         messages: list[dict[str, str]] = []
@@ -49,17 +77,16 @@ class OpenRouterAdapter(ModelAdapter):
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        req = request.Request(
+        data = _http_post_json(
             url=f"{self.base_url}/chat/completions",
-            method="POST",
-            data=json.dumps({"model": self.model, "messages": messages}).encode("utf-8"),
+            payload={"model": self.model, "messages": messages},
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.api_key}",
             },
+            timeout_seconds=self.timeout_seconds,
+            retries=self.retries,
         )
-        with request.urlopen(req, timeout=self.timeout_seconds) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
 
         choices = data.get("choices", [])
         if not choices:
