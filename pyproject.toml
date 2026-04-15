@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nablaclaw"
+version = "0.1.0"
+description = "Arquitetura avançada de orquestração multiagente com modelos e algoritmos locais"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{name = "NablaClaw"}]
+dependencies = []
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[project.scripts]
+nablaclaw = "nablaclaw.cli:main"
